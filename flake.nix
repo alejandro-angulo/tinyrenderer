@@ -35,7 +35,7 @@
             {
               # https://devenv.sh/reference/options/
               languages.cplusplus.enable = true;
-              packages = [pkgs.bear];
+              packages = with pkgs; [bear gdb];
 
               # enterShell = ''
               #   hello

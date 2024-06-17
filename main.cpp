@@ -1,25 +1,15 @@
+#include "geometry.h"
+#include "model.h"
 #include "tgaimage.h"
-#include <iostream>
 
 const TGAColor white = TGAColor(255, 255, 255, 255);
 const TGAColor red = TGAColor(255, 0, 0, 255);
+const TGAColor green = TGAColor(0, 255, 0, 255);
 const TGAColor blue = TGAColor(0, 0, 255, 255);
+const int height = 800;
+const int width = 800;
 
-void line(int, int, int, int, TGAImage *, TGAColor);
-
-int main(int argc, char **argv) {
-  TGAImage image(100, 100, TGAImage::RGB);
-  // image.set(52, 41, red);
-  line(13, 20, 80, 40, &image, white);
-  line(20, 13, 40, 80, &image, red);
-  line(80, 40, 13, 20, &image, red);
-  image.flip_vertically(); // i want to have the origin at the left bottom
-                           // corner of the image
-  image.write_tga_file("output.tga");
-  return 0;
-}
-
-void line(int x0, int y0, int x1, int y1, TGAImage *image, TGAColor color) {
+void line(int x0, int y0, int x1, int y1, TGAImage &image, TGAColor color) {
   /**
    * Draws a line using Bresenham's line algorithm
    *
@@ -83,24 +73,58 @@ void line(int x0, int y0, int x1, int y1, TGAImage *image, TGAColor color) {
     std::swap(y0, y1);
   }
 
+  // Used to account for negative slopes (need to decrement y in the for loop
+  // below and negate dy to keep the math straight
+  int y_step = (y1 > y0) ? 1 : -1;
+
   int dx = x1 - x0;
-  int dy = y1 - y0;
+  int dy = (y1 - y0) * y_step;
   int dD = 2 * dy - dx;
 
   int y = y0;
   for (int x = x0; x <= x1; x++) {
     if (steep) {
-      image->set(y, x, color);
-
+      image.set(y, x, color);
     } else {
-      image->set(x, y, color);
+      image.set(x, y, color);
     }
 
     // Update delta(D) and update y-coordinate if necessary.
     if (dD > 0) {
-      y += 1;
+      y += y_step;
       dD -= 2 * dx;
     }
     dD += 2 * dy;
   }
+}
+
+int main(int argc, char **argv) {
+  TGAImage image(width, height, TGAImage::RGB);
+
+  Model *model = new Model("obj/african_head.obj");
+  for (int i = 0; i < model->nfaces(); i++) {
+    std::vector<int> face = model->face(i);
+    // Connect all vertices
+    for (int j = 0; j < 3; j++) {
+      Vec3f v0 = model->vert(face[j]);
+      Vec3f v1 = model->vert(face[(j + 1) % 3]);
+
+      // x and y values are in the range (-1, 1)
+      // Want a value of (0, 0) to correspond to the center of our image
+      // (e.g. for an 800x800 image (0, 0) points from the vertices should
+      // correspond to (400, 400) in the image).
+      float x0 = (v0.x + 1) * width / 2.0;
+      float y0 = (v0.y + 1) * height / 2.0;
+      float x1 = (v1.x + 1) * width / 2.0;
+      float y1 = (v1.y + 1) * height / 2.0;
+
+      line(x0, y0, x1, y1, image, white);
+    }
+  }
+
+  image.flip_vertically(); // i want to have the origin at the left bottom
+                           // corner of the image
+  image.write_tga_file("output.tga");
+  // delete model;
+  return 0;
 }
