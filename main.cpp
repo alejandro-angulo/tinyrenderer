@@ -1,13 +1,14 @@
 #include "geometry.h"
 #include "model.h"
 #include "tgaimage.h"
+#include <iostream>
 
 const TGAColor white = TGAColor(255, 255, 255, 255);
 const TGAColor red = TGAColor(255, 0, 0, 255);
 const TGAColor green = TGAColor(0, 255, 0, 255);
 const TGAColor blue = TGAColor(0, 0, 255, 255);
-const int height = 800;
-const int width = 800;
+const int height = 200;
+const int width = 200;
 
 void line(int x0, int y0, int x1, int y1, TGAImage &image, TGAColor color) {
   /**
@@ -98,29 +99,106 @@ void line(int x0, int y0, int x1, int y1, TGAImage &image, TGAColor color) {
   }
 }
 
+void line(Vec2i v0, Vec2i v1, TGAImage &image, TGAColor color) {
+  line(v0.x, v0.y, v1.x, v1.y, image, color);
+}
+
+void triangle(Vec2i v0, Vec2i v1, Vec2i v2, TGAImage &image, TGAColor color) {
+  /**
+   * Draws a filled in triangle
+   *
+   * First, the vertices are sorted in descending order based on y-coordinates
+   * (v0 is the largest, v2 is the smallest). Then, the triangle is split into
+   * two segments. The first segment is the top "half" that includes
+   * y-coordinates in the range [v1.y, v0.y]. The second segment is the bottom
+   * "half" that includes y-coordinates in the range [v2.y, v1.y]. For each
+   * segment, we take horizontal slices and draw lines connecting the left and
+   * right boundaries.
+   */
+
+  // Sort vertices based on y-coordinates (descending)
+  if (v0.y < v1.y)
+    std::swap(v0, v1);
+  if (v0.y < v2.y)
+    std::swap(v0, v2);
+  if (v1.y < v2.y)
+    std::swap(v1, v2);
+
+  int total_height = v0.y - v2.y;
+  for (int y = v0.y; y >= v2.y; y--) {
+    bool top_half = (y >= v1.y);
+    int segment_height = top_half ? v0.y - v1.y : v1.y - v2.y;
+
+    Vec2i A;
+    Vec2i B;
+
+    if (segment_height == 0) {
+      A = top_half ? v0 : v1;
+      B = top_half ? v1 : v2;
+    } else {
+
+      // Alpha and beta are scalars that indicate the progress along a segment
+      // as a percentage. These will allow us compute our x coodinates later on.
+      float alpha = (float)(v0.y - y) / total_height;
+      float beta = (float)((top_half ? v0.y : v1.y) - y) / segment_height;
+
+      // Compute our boundary points.
+      //
+      // We are travelling across the segments of a triangle. Take our starting
+      // vertex (depends on whether we're in the top or bottom "half") and
+      // offset it by the vector connecting the two segments. Make sure to
+      // multiply the vector by the scalars we computed earlier (indicating how
+      // far along we are along a segment).
+      A = v0 + (v2 - v0) * alpha;
+      B = (top_half ? v0 + (v1 - v0) * beta : v1 + (v2 - v1) * beta);
+
+      // Make sure these are in ascending order so the loop below works
+      // correctly.
+      if (A.x > B.x)
+        std::swap(A, B);
+    }
+
+    for (int x = A.x; x <= B.x; x++) {
+      image.set(x, y, color);
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   TGAImage image(width, height, TGAImage::RGB);
 
-  Model *model = new Model("obj/african_head.obj");
-  for (int i = 0; i < model->nfaces(); i++) {
-    std::vector<int> face = model->face(i);
-    // Connect all vertices
-    for (int j = 0; j < 3; j++) {
-      Vec3f v0 = model->vert(face[j]);
-      Vec3f v1 = model->vert(face[(j + 1) % 3]);
+  // Model *model = new Model("obj/african_head.obj");
+  // for (int i = 0; i < model->nfaces(); i++) {
+  //   std::vector<int> face = model->face(i);
+  //   // Connect all vertices
+  //   for (int j = 0; j < 3; j++) {
+  //     Vec3f v0 = model->vert(face[j]);
+  //     Vec3f v1 = model->vert(face[(j + 1) % 3]);
+  //
+  //     // x and y values are in the range (-1, 1)
+  //     // Want a value of (0, 0) to correspond to the center of our image
+  //     // (e.g. for an 800x800 image (0, 0) points from the vertices should
+  //     // correspond to (400, 400) in the image).
+  //     float x0 = (v0.x + 1) * width / 2.0;
+  //     float y0 = (v0.y + 1) * height / 2.0;
+  //     float x1 = (v1.x + 1) * width / 2.0;
+  //     float y1 = (v1.y + 1) * height / 2.0;
+  //
+  //     line(x0, y0, x1, y1, image, white);
+  //   }
+  // }
 
-      // x and y values are in the range (-1, 1)
-      // Want a value of (0, 0) to correspond to the center of our image
-      // (e.g. for an 800x800 image (0, 0) points from the vertices should
-      // correspond to (400, 400) in the image).
-      float x0 = (v0.x + 1) * width / 2.0;
-      float y0 = (v0.y + 1) * height / 2.0;
-      float x1 = (v1.x + 1) * width / 2.0;
-      float y1 = (v1.y + 1) * height / 2.0;
+  Vec2i t0[3] = {Vec2i(10, 70), Vec2i(50, 160), Vec2i(70, 80)};
+  Vec2i t1[3] = {Vec2i(180, 50), Vec2i(150, 1), Vec2i(70, 180)};
+  Vec2i t2[3] = {Vec2i(180, 150), Vec2i(120, 160), Vec2i(130, 180)};
+  Vec2i t4[3] = {Vec2i(180, 150), Vec2i(120, 150), Vec2i(140, 100)};
+  Vec2i t5[3] = {Vec2i(180, 0), Vec2i(120, 0), Vec2i(140, 50)};
 
-      line(x0, y0, x1, y1, image, white);
-    }
-  }
+  triangle(t0[0], t0[1], t0[2], image, red);
+  triangle(t1[0], t1[1], t1[2], image, white);
+  triangle(t2[0], t2[1], t2[2], image, green);
+  triangle(t4[0], t4[1], t4[2], image, green);
+  triangle(t5[0], t5[1], t5[2], image, green);
 
   image.flip_vertically(); // i want to have the origin at the left bottom
                            // corner of the image
