@@ -2,7 +2,6 @@
 #include "model.h"
 #include "tgaimage.h"
 #include <algorithm>
-#include <iostream>
 
 const TGAColor white = TGAColor(255, 255, 255, 255);
 const TGAColor red = TGAColor(255, 0, 0, 255);
@@ -10,6 +9,7 @@ const TGAColor green = TGAColor(0, 255, 0, 255);
 const TGAColor blue = TGAColor(0, 0, 255, 255);
 const int height = 800;
 const int width = 800;
+const Vec3f light_direction(0, 0, -1); // Where the light is coming from.
 
 void line(int x0, int y0, int x1, int y1, TGAImage &image, TGAColor color) {
   /**
@@ -218,24 +218,45 @@ int main(int argc, char **argv) {
   for (int i = 0; i < model->nfaces(); i++) {
     std::vector<int> face = model->face(i);
     Vec2i screen_coords[3];
+    Vec3f world_coords[3];
     for (int j = 0; j < 3; j++) {
       // Convert world coordinates (what's in our 3d model) to coordinates on
       // our screen. Take the center of our screen (halfway across and halfway
       // up) to be the origin .
-      Vec3f world_coords = model->vert(face[j]);
+      world_coords[j] = model->vert(face[j]);
 
       // Add 1 to our world coordinates since conversion of a float to an int
       // truncates our value (e.g. a float of 2.3 becomes an int of 2).
-      screen_coords[j] = Vec2i((world_coords.x + 1.0) * width / 2,
-                               (world_coords.y + 1.0) * height / 2);
+      screen_coords[j] = Vec2i((world_coords[j].x + 1.0) * width / 2,
+                               (world_coords[j].y + 1.0) * height / 2);
     }
-    triangle(screen_coords, image,
-             TGAColor(rand() % 255, rand() % 255, rand() % 255, 255));
+
+    // Want to get a vector perpendicular to our triangle
+    Vec3f normal = ((world_coords[2] - world_coords[0])   // Vector XZ
+                    ^ (world_coords[1] - world_coords[0]) // vector XY
+                    )
+                       .normalize();
+    // Light intesity is the dot product of our normal vector and our light's
+    // direction. This means that the intensity is highest when our face is
+    // perpendicular to the light (we take the dot product of the normal which
+    // is already perpendicular to our face and dot product is largest when
+    // parallel).
+    float intensity = normal * light_direction;
+
+    // Don't bother drawing a triangle if intensity <= 0 .
+    // An intensity of 0 means there's no light on it all (completely dark).
+    // A negative intensity means that the light hits from behind (back culling
+    // -- skipping triangles that shouldn't be visible).
+    if (intensity > 0) {
+      triangle(
+          screen_coords, image,
+          TGAColor(intensity * 255, intensity * 255, intensity * 255, 255));
+    }
   }
 
   image.flip_vertically(); // i want to have the origin at the left bottom
                            // corner of the image
   image.write_tga_file("output.tga");
-  // delete model;
+  delete model;
   return 0;
 }
