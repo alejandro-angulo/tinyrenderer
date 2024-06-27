@@ -8,8 +8,8 @@ const TGAColor white = TGAColor(255, 255, 255, 255);
 const TGAColor red = TGAColor(255, 0, 0, 255);
 const TGAColor green = TGAColor(0, 255, 0, 255);
 const TGAColor blue = TGAColor(0, 0, 255, 255);
-const int height = 200;
-const int width = 200;
+const int height = 800;
+const int width = 800;
 
 void line(int x0, int y0, int x1, int y1, TGAImage &image, TGAColor color) {
   /**
@@ -214,38 +214,24 @@ void triangle(Vec2i *pts, TGAImage &image, TGAColor color) {
 int main(int argc, char **argv) {
   TGAImage image(width, height, TGAImage::RGB);
 
-  // Model *model = new Model("obj/african_head.obj");
-  // for (int i = 0; i < model->nfaces(); i++) {
-  //   std::vector<int> face = model->face(i);
-  //   // Connect all vertices
-  //   for (int j = 0; j < 3; j++) {
-  //     Vec3f v0 = model->vert(face[j]);
-  //     Vec3f v1 = model->vert(face[(j + 1) % 3]);
-  //
-  //     // x and y values are in the range (-1, 1)
-  //     // Want a value of (0, 0) to correspond to the center of our image
-  //     // (e.g. for an 800x800 image (0, 0) points from the vertices should
-  //     // correspond to (400, 400) in the image).
-  //     float x0 = (v0.x + 1) * width / 2.0;
-  //     float y0 = (v0.y + 1) * height / 2.0;
-  //     float x1 = (v1.x + 1) * width / 2.0;
-  //     float y1 = (v1.y + 1) * height / 2.0;
-  //
-  //     line(x0, y0, x1, y1, image, white);
-  //   }
-  // }
+  Model *model = new Model("obj/african_head.obj");
+  for (int i = 0; i < model->nfaces(); i++) {
+    std::vector<int> face = model->face(i);
+    Vec2i screen_coords[3];
+    for (int j = 0; j < 3; j++) {
+      // Convert world coordinates (what's in our 3d model) to coordinates on
+      // our screen. Take the center of our screen (halfway across and halfway
+      // up) to be the origin .
+      Vec3f world_coords = model->vert(face[j]);
 
-  Vec2i t0[3] = {Vec2i(10, 70), Vec2i(50, 160), Vec2i(70, 80)};
-  Vec2i t1[3] = {Vec2i(180, 50), Vec2i(150, 1), Vec2i(70, 180)};
-  Vec2i t2[3] = {Vec2i(180, 150), Vec2i(120, 160), Vec2i(130, 180)};
-  Vec2i t4[3] = {Vec2i(180, 150), Vec2i(120, 150), Vec2i(140, 100)};
-  Vec2i t5[3] = {Vec2i(180, 0), Vec2i(120, 0), Vec2i(140, 50)};
-
-  triangle(t0, image, red);
-  triangle(t1, image, white);
-  triangle(t2, image, green);
-  triangle(t4, image, green);
-  triangle(t5, image, green);
+      // Add 1 to our world coordinates since conversion of a float to an int
+      // truncates our value (e.g. a float of 2.3 becomes an int of 2).
+      screen_coords[j] = Vec2i((world_coords.x + 1.0) * width / 2,
+                               (world_coords.y + 1.0) * height / 2);
+    }
+    triangle(screen_coords, image,
+             TGAColor(rand() % 255, rand() % 255, rand() % 255, 255));
+  }
 
   image.flip_vertically(); // i want to have the origin at the left bottom
                            // corner of the image
