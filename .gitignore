@@ -3,4 +3,4 @@ main
 *.o
 .cache
 compile_commands.json
-output.tga
+*.tga

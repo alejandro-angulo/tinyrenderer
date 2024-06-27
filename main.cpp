@@ -1,6 +1,7 @@
 #include "geometry.h"
 #include "model.h"
 #include "tgaimage.h"
+#include <algorithm>
 #include <iostream>
 
 const TGAColor white = TGAColor(255, 255, 255, 255);
@@ -103,63 +104,109 @@ void line(Vec2i v0, Vec2i v1, TGAImage &image, TGAColor color) {
   line(v0.x, v0.y, v1.x, v1.y, image, color);
 }
 
-void triangle(Vec2i v0, Vec2i v1, Vec2i v2, TGAImage &image, TGAColor color) {
+Vec3f barycentric(Vec2i *pts, Vec2i P) {
   /**
-   * Draws a filled in triangle
+   * Computes the barycentric coordinates for a point P with respect to triangle
+   * ABC.
    *
-   * First, the vertices are sorted in descending order based on y-coordinates
-   * (v0 is the largest, v2 is the smallest). Then, the triangle is split into
-   * two segments. The first segment is the top "half" that includes
-   * y-coordinates in the range [v1.y, v0.y]. The second segment is the bottom
-   * "half" that includes y-coordinates in the range [v2.y, v1.y]. For each
-   * segment, we take horizontal slices and draw lines connecting the left and
-   * right boundaries.
+   * pts represents the three vertices of the triangle (pts[0] = A, pts[1] = B,
+   * pts[2] = C). In a barycentric coordinate system, all points sum to 1 i.e.
+   * if we have barycentric coordinates (w, u, v) then w + u + v must sum
+   * to 1. We also know that w = 1 - u - v, so we need to find the coordinates:
+   * (1 - u - v, u ,v).
+   *
+   * For a given point P, consider the vector AP (vector from vertex A
+   * connecting to point P). We can express the barycentric coordinates for P as
+   *
+   * P = (1 - u - v) A + u B + v C
+   *
+   * If we assign weight (1 - u - v) to vertex A, weight u to vertex B, and
+   * weight v to vertex C then P must be the center of mass.
+   *
+   * P = A + u * AB + v * AC
+   *
+   * Where AB is the vector from A to B and AC is the vector from A to C. Since
+   * P is our center of mass, we know:
+   *
+   * u * AB + v * AC + PA = 0
+   *
+   * where PA is the vector from P (the point we want to find the barycentric
+   * coordinates for) to A.
+   *
+   * This can be rewritten with matrices as:
+   *
+   *
+   *           [ AB ]
+   * [ u v 1 ] [ AC ] = 0
+   *           [ PA ]
+   *
+   * The vector (u, v, 1) must be orthogonal to both the x and y components of
+   * the vector (AB, AC, PA). We can find an orthogonal vector by taking the
+   * cross product of the x and y components.
+   *
+   * [ u v 1 ] = (AB_x AC_x PA_x) x (AB_y AC_y PA_y)
+   *
+   * See here:
+   * https://en.wikipedia.org/wiki/Barycentric_coordinate_system#Conversion_between_barycentric_and_Cartesian_coordinates
    */
 
-  // Sort vertices based on y-coordinates (descending)
-  if (v0.y < v1.y)
-    std::swap(v0, v1);
-  if (v0.y < v2.y)
-    std::swap(v0, v2);
-  if (v1.y < v2.y)
-    std::swap(v1, v2);
+  // Given a triangle's vertices: A, B, and C. Let pts[0] refer to 1, pts[1]
+  // refer to B, and pts[2] refer to C.
+  Vec3f orthogonal = Vec3f(pts[2].raw[0] - pts[0].raw[0], // vector AB_x
+                           pts[1].raw[0] - pts[0].raw[0], // vector AC_x
+                           pts[0].raw[0] - P.raw[0]       // vector PA_x
+                           ) ^
+                     Vec3f(pts[2].raw[1] - pts[0].raw[1], // vector AB_y
+                           pts[1].raw[1] - pts[0].raw[1], // vector AC_y
+                           pts[0].raw[1] - P.raw[1]       // vector PA_y
+                     );
 
-  int total_height = v0.y - v2.y;
-  for (int y = v0.y; y >= v2.y; y--) {
-    bool top_half = (y >= v1.y);
-    int segment_height = top_half ? v0.y - v1.y : v1.y - v2.y;
+  // We have the orthogonal vector (u, v, 1) and we know:
+  //
+  // P = (1 - u - v) A + u B + v C
+  //
+  // Rearrange the orthogonal vector to get P. Divide by the A component to
+  // normalize (want to sum to 1). Note the A component is represented by "z" in
+  // the code.
 
-    Vec2i A;
-    Vec2i B;
+  return Vec3f((orthogonal.z - orthogonal.x - orthogonal.y) / orthogonal.z,
+               orthogonal.y / orthogonal.z, orthogonal.x / orthogonal.z);
+}
 
-    if (segment_height == 0) {
-      A = top_half ? v0 : v1;
-      B = top_half ? v1 : v2;
-    } else {
+void triangle(Vec2i *pts, TGAImage &image, TGAColor color) {
+  // Find a bounding box for the triangle. Then, iterate through points inside
+  // the bounding box and determine if they are inside the triangle. We know a
+  // point is outside of the triangle if any of its barycentric coordinates are
+  // < 0.
 
-      // Alpha and beta are scalars that indicate the progress along a segment
-      // as a percentage. These will allow us compute our x coodinates later on.
-      float alpha = (float)(v0.y - y) / total_height;
-      float beta = (float)((top_half ? v0.y : v1.y) - y) / segment_height;
+  Vec2i bboxmin(image.get_width() - 1, image.get_height() - 1);
+  Vec2i bboxmax(0, 0);
+  Vec2i clamp(image.get_width() - 1, image.get_height() - 1);
 
-      // Compute our boundary points.
-      //
-      // We are travelling across the segments of a triangle. Take our starting
-      // vertex (depends on whether we're in the top or bottom "half") and
-      // offset it by the vector connecting the two segments. Make sure to
-      // multiply the vector by the scalars we computed earlier (indicating how
-      // far along we are along a segment).
-      A = v0 + (v2 - v0) * alpha;
-      B = (top_half ? v0 + (v1 - v0) * beta : v1 + (v2 - v1) * beta);
+  // Iterate over the triangle's vertices
+  for (int i = 0; i < 3; i++) {
+    // Find max but make sure we don't come up with a bounding box outside of
+    // our image's boundaries (no coordinates larger than (image.width,
+    // image.height)).
+    bboxmax.x = std::min(clamp.x, std::max(pts[i].x, bboxmax.x));
+    bboxmax.y = std::min(clamp.y, std::max(pts[i].y, bboxmax.y));
 
-      // Make sure these are in ascending order so the loop below works
-      // correctly.
-      if (A.x > B.x)
-        std::swap(A, B);
-    }
+    // Find min but make sure we don't come up with a bounding box outside of
+    // our image's boundaries (no coordinates less than (0, 0)).
+    bboxmin.x = std::max(0, std::min(pts[i].x, bboxmin.x));
+    bboxmin.y = std::max(0, std::min(pts[i].y, bboxmin.y));
+  }
 
-    for (int x = A.x; x <= B.x; x++) {
-      image.set(x, y, color);
+  Vec2i P;
+  for (P.x = bboxmin.x; P.x <= bboxmax.x; P.x++) {
+    for (P.y = bboxmin.y; P.y <= bboxmax.y; P.y++) {
+      Vec3f barycentric_coordinates = barycentric(pts, P);
+      if (barycentric_coordinates.x < 0 || barycentric_coordinates.y < 0 ||
+          barycentric_coordinates.z < 0) {
+        continue;
+      }
+
+      image.set(P.x, P.y, color);
     }
   }
 }
@@ -194,11 +241,11 @@ int main(int argc, char **argv) {
   Vec2i t4[3] = {Vec2i(180, 150), Vec2i(120, 150), Vec2i(140, 100)};
   Vec2i t5[3] = {Vec2i(180, 0), Vec2i(120, 0), Vec2i(140, 50)};
 
-  triangle(t0[0], t0[1], t0[2], image, red);
-  triangle(t1[0], t1[1], t1[2], image, white);
-  triangle(t2[0], t2[1], t2[2], image, green);
-  triangle(t4[0], t4[1], t4[2], image, green);
-  triangle(t5[0], t5[1], t5[2], image, green);
+  triangle(t0, image, red);
+  triangle(t1, image, white);
+  triangle(t2, image, green);
+  triangle(t4, image, green);
+  triangle(t5, image, green);
 
   image.flip_vertically(); // i want to have the origin at the left bottom
                            // corner of the image
