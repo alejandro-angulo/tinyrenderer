@@ -220,14 +220,7 @@ int main(int argc, char **argv) {
 
   Model *model = new Model("obj/african_head.obj");
   float zbuffer[width * height];
-
-  // XXX: For some reason this doesn't work right (ends up rendering a
-  // "skinnier" model)
-  // std::fill_n(zbuffer, width * height, -std::numeric_limits<float>::min());
-
-  for (int i = width * height; i--;
-       zbuffer[i] = -std::numeric_limits<float>::max())
-    ;
+  std::fill_n(zbuffer, width * height, -std::numeric_limits<float>::max());
 
   for (int i = 0; i < model->nfaces(); i++) {
     std::vector<int> face = model->face(i);
