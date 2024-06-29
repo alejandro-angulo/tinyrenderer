@@ -2,6 +2,9 @@
 #include "model.h"
 #include "tgaimage.h"
 #include <algorithm>
+#include <iostream>
+#include <limits>
+#include <utility>
 
 const TGAColor white = TGAColor(255, 255, 255, 255);
 const TGAColor red = TGAColor(255, 0, 0, 255);
@@ -104,13 +107,12 @@ void line(Vec2i v0, Vec2i v1, TGAImage &image, TGAColor color) {
   line(v0.x, v0.y, v1.x, v1.y, image, color);
 }
 
-Vec3f barycentric(Vec2i *pts, Vec2i P) {
+Vec3f barycentric(Vec3f A, Vec3f B, Vec3f C, Vec3f P) {
   /**
    * Computes the barycentric coordinates for a point P with respect to triangle
    * ABC.
    *
-   * pts represents the three vertices of the triangle (pts[0] = A, pts[1] = B,
-   * pts[2] = C). In a barycentric coordinate system, all points sum to 1 i.e.
+   * In a barycentric coordinate system, all points sum to 1 i.e.
    * if we have barycentric coordinates (w, u, v) then w + u + v must sum
    * to 1. We also know that w = 1 - u - v, so we need to find the coordinates:
    * (1 - u - v, u ,v).
@@ -150,16 +152,14 @@ Vec3f barycentric(Vec2i *pts, Vec2i P) {
    * https://en.wikipedia.org/wiki/Barycentric_coordinate_system#Conversion_between_barycentric_and_Cartesian_coordinates
    */
 
-  // Given a triangle's vertices: A, B, and C. Let pts[0] refer to 1, pts[1]
-  // refer to B, and pts[2] refer to C.
-  Vec3f orthogonal = Vec3f(pts[2].raw[0] - pts[0].raw[0], // vector AB_x
-                           pts[1].raw[0] - pts[0].raw[0], // vector AC_x
-                           pts[0].raw[0] - P.raw[0]       // vector PA_x
-                           ) ^
-                     Vec3f(pts[2].raw[1] - pts[0].raw[1], // vector AB_y
-                           pts[1].raw[1] - pts[0].raw[1], // vector AC_y
-                           pts[0].raw[1] - P.raw[1]       // vector PA_y
-                     );
+  Vec3f s[2]; // Will hold our AB, AC, and PA vectors (x- and y-components)
+  for (int i = 0; i < 2; i++) {
+    s[i][0] = C[i] - A[i];
+    s[i][1] = B[i] - A[i];
+    s[i][2] = A[i] - P[i];
+  }
+
+  Vec3f orthogonal = cross(s[0], s[1]);
 
   // We have the orthogonal vector (u, v, 1) and we know:
   //
@@ -169,44 +169,48 @@ Vec3f barycentric(Vec2i *pts, Vec2i P) {
   // normalize (want to sum to 1). Note the A component is represented by "z" in
   // the code.
 
-  return Vec3f((orthogonal.z - orthogonal.x - orthogonal.y) / orthogonal.z,
+  // if (std::abs(orthogonal.z) < 1e-2) {
+  //   return Vec3f(-1, 1, 1);
+  // }
+
+  return Vec3f(1.0f - (orthogonal.x + orthogonal.y) / orthogonal.z,
                orthogonal.y / orthogonal.z, orthogonal.x / orthogonal.z);
 }
 
-void triangle(Vec2i *pts, TGAImage &image, TGAColor color) {
-  // Find a bounding box for the triangle. Then, iterate through points inside
-  // the bounding box and determine if they are inside the triangle. We know a
-  // point is outside of the triangle if any of its barycentric coordinates are
-  // < 0.
-
-  Vec2i bboxmin(image.get_width() - 1, image.get_height() - 1);
-  Vec2i bboxmax(0, 0);
-  Vec2i clamp(image.get_width() - 1, image.get_height() - 1);
+void triangle(Vec3f *pts, float *zbuffer, TGAImage &image, TGAColor color) {
+  Vec2f bboxmin(std::numeric_limits<float>::max(),
+                std::numeric_limits<float>::max());
+  Vec2f bboxmax(-std::numeric_limits<float>::max(),
+                -std::numeric_limits<float>::max());
+  Vec2f clamp(image.get_width() - 1, image.get_height() - 1);
 
   // Iterate over the triangle's vertices
   for (int i = 0; i < 3; i++) {
-    // Find max but make sure we don't come up with a bounding box outside of
-    // our image's boundaries (no coordinates larger than (image.width,
-    // image.height)).
-    bboxmax.x = std::min(clamp.x, std::max(pts[i].x, bboxmax.x));
-    bboxmax.y = std::min(clamp.y, std::max(pts[i].y, bboxmax.y));
+    for (int j = 0; j < 2; j++) {
+      // Find max but make sure we don't come up with a bounding box outside of
+      // our image's boundaries (no coordinates larger than (image.width,
+      // image.height)).
+      bboxmax[j] = std::min(clamp[j], std::max(bboxmax[j], pts[i][j]));
 
-    // Find min but make sure we don't come up with a bounding box outside of
-    // our image's boundaries (no coordinates less than (0, 0)).
-    bboxmin.x = std::max(0, std::min(pts[i].x, bboxmin.x));
-    bboxmin.y = std::max(0, std::min(pts[i].y, bboxmin.y));
+      // Find min but make sure we don't come up with a bounding box outside of
+      // our image's boundaries (no coordinates less than (0, 0)).
+      bboxmin[j] = std::max(0.f, std::min(bboxmin[j], pts[i][j]));
+    }
   }
 
-  Vec2i P;
+  Vec3f P;
   for (P.x = bboxmin.x; P.x <= bboxmax.x; P.x++) {
     for (P.y = bboxmin.y; P.y <= bboxmax.y; P.y++) {
-      Vec3f barycentric_coordinates = barycentric(pts, P);
-      if (barycentric_coordinates.x < 0 || barycentric_coordinates.y < 0 ||
-          barycentric_coordinates.z < 0) {
+      Vec3f bc_screen = barycentric(pts[0], pts[1], pts[2], P);
+      if (bc_screen.x < 0 || bc_screen.y < 0 || bc_screen.z < 0)
         continue;
+      P.z = 0;
+      for (int i = 0; i < 3; i++)
+        P.z += pts[i][2] * bc_screen[i];
+      if (zbuffer[int(P.x + P.y * width)] < P.z) {
+        zbuffer[int(P.x + P.y * width)] = P.z;
+        image.set(P.x, P.y, color);
       }
-
-      image.set(P.x, P.y, color);
     }
   }
 }
@@ -215,42 +219,57 @@ int main(int argc, char **argv) {
   TGAImage image(width, height, TGAImage::RGB);
 
   Model *model = new Model("obj/african_head.obj");
+  float zbuffer[width * height];
+
+  // XXX: For some reason this doesn't work right (ends up rendering a
+  // "skinnier" model)
+  // std::fill_n(zbuffer, width * height, -std::numeric_limits<float>::min());
+
+  for (int i = width * height; i--;
+       zbuffer[i] = -std::numeric_limits<float>::max())
+    ;
+
   for (int i = 0; i < model->nfaces(); i++) {
     std::vector<int> face = model->face(i);
-    Vec2i screen_coords[3];
+    Vec3f screen_coords[3];
     Vec3f world_coords[3];
     for (int j = 0; j < 3; j++) {
       // Convert world coordinates (what's in our 3d model) to coordinates on
-      // our screen. Take the center of our screen (halfway across and halfway
-      // up) to be the origin .
+      // our screen. Take the center of our screen (halfway across and
+      // halfway up) to be the origin .
       world_coords[j] = model->vert(face[j]);
 
       // Add 1 to our world coordinates since conversion of a float to an int
       // truncates our value (e.g. a float of 2.3 becomes an int of 2).
-      screen_coords[j] = Vec2i((world_coords[j].x + 1.0) * width / 2,
-                               (world_coords[j].y + 1.0) * height / 2);
+      screen_coords[j] =
+          Vec3f(int((world_coords[j].x + 1.0) * width / 2.0 + 0.5),
+                int((world_coords[j].y + 1.0) * height / 2.0 + 0.5),
+                world_coords[j].z);
     }
 
     // Want to get a vector perpendicular to our triangle
-    Vec3f normal = ((world_coords[2] - world_coords[0])   // Vector XZ
-                    ^ (world_coords[1] - world_coords[0]) // vector XY
-                    )
+    Vec3f normal = cross((world_coords[2] - world_coords[0]) // Vector XZ
+                         ,
+                         (world_coords[1] - world_coords[0]) // vector XY
+                         )
                        .normalize();
     // Light intesity is the dot product of our normal vector and our light's
     // direction. This means that the intensity is highest when our face is
-    // perpendicular to the light (we take the dot product of the normal which
-    // is already perpendicular to our face and dot product is largest when
-    // parallel).
+    // perpendicular to the light (we take the dot product of the normal
+    // which is already perpendicular to our face and dot product is largest
+    // when parallel).
     float intensity = normal * light_direction;
 
     // Don't bother drawing a triangle if intensity <= 0 .
     // An intensity of 0 means there's no light on it all (completely dark).
-    // A negative intensity means that the light hits from behind (back culling
-    // -- skipping triangles that shouldn't be visible).
+    // A negative intensity means that the light hits from behind (back
+    // culling -- skipping triangles that shouldn't be visible).
     if (intensity > 0) {
-      triangle(
-          screen_coords, image,
-          TGAColor(intensity * 255, intensity * 255, intensity * 255, 255));
+      triangle(screen_coords, zbuffer, image,
+               TGAColor(intensity * 255, intensity * 255, intensity * 255, 255)
+               // TGAColor(rand() % 255, rand() % 255, rand() % 255, 255)
+
+      );
     }
   }
 
